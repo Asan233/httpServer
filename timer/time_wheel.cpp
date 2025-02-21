@@ -51,6 +51,19 @@ void time_wheel::del_timer(tw_timer* timer)
     delete timer;
 }
 
+void time_wheel::adjust_timer(tw_timer* timer)
+{
+    if(!timer) return;
+    // 从链表中取出timer
+    timer->prev->next = timer->next;
+    timer->prev->next->prev = timer->prev;
+    int slot = (cur_slot + 3) % N;
+    int rot = 0;
+    timer->rotation = 0;
+    timer->time_slot = slot;
+    add_timer(timer);
+}
+
 /* 心跳函数 */
 void time_wheel::tick()
 {
@@ -71,6 +84,10 @@ void time_wheel::tick()
     // 移动当前slot指针
     cur_slot = (cur_slot + 1) % N;
 }
+
+// 定义静态成员变量
+int *Utils::u_pipefd = 0;
+int Utils::u_epollfd = 0;
 
 void Utils::init(int timeslot)
 {
@@ -115,7 +132,7 @@ void Utils::sig_handler(int sig)
 }
 
 // 设置信号函数
-void addsig(int sig, void(handler)(int), bool restart = true)
+void Utils::addsig(int sig, void(handler)(int), bool restart)
 {
     struct sigaction sa;
     memset(&sa, '\0', sizeof(sa));
@@ -131,6 +148,12 @@ void Utils::timer_handler()
 {
     m_time_wheel.tick();
     alarm(m_TIMESLOT);
+}
+
+void Utils::show_error(int connfd, const char* info)
+{
+    send(connfd, info, strlen(info), 0);
+    close(connfd);
 }
 
 /* 连接超时回调函数 */

@@ -119,6 +119,11 @@ void sqlconnection_pool::DestroyPool()
     lock.unlock();
 }
 
+sqlconnection_pool::~sqlconnection_pool()
+{
+    DestroyPool();
+}
+
 int sqlconnection_pool::GetFreeConn()
 {
     return m_FreeConn;

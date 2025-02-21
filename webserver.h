@@ -18,9 +18,11 @@
 #include "timer/time_wheel.h"
 #include "threadpool/threadpool.h"
 #include "http/http_conn.h"
+#include "timer/time_wheel.h"
 
 const int MAX_FD = 65536;               // 最大文件描述符
 const int MAX_EVENT_NUMBER = 10000;     // 最大事件数
+const int TIMESLOT = 5;                 // 最小Tick单位时间w
 
 /**
  *      后台服务器类
@@ -53,14 +55,14 @@ public:
     void deal_timer(tw_timer *timer, int sockfd);
     bool dealclientdata();
     bool dealwithsignal(bool &timeout, bool &stop_server);
-    bool dealwiththread(int sockfd);
+    void dealwithread(int sockfd);
     void dealwithwrite(int sockfd);
 
 public:
     /* 服务器基本参数 */
     int m_port;         // 端口号
     char *m_root;       // 跟文件路径
-    int m_log_write;    // 是否写日志
+    int m_log_write;    // 是否异步写日志
     int m_close_log;    // 是否启动日志
     int m_actormodel;   // 服务器 同步/异步 模式
 

@@ -46,11 +46,11 @@ public:
 
     void add_timer(tw_timer* timer);
     void del_timer(tw_timer* timer);
+    void adjust_timer(tw_timer* timer);
     void tick();
 
 private:
     static const int N = 128;               // 时间轮的插槽数量
-    static const int TI = 1;                // 最小心跳数
     int cur_slot;                           // 当前指针指向什么插槽
     tw_timer* slot_head[N];                 // 每个插槽的头指针，方便插入与删除定时器
     tw_timer* slot_tail[N];                 // 每个插槽的尾指针，方便插入与删除定时器
