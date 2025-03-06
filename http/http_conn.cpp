@@ -213,6 +213,7 @@ bool http_conn::read_once()
             return false;
         }
 
+        LOG_INFO("client(%s) read %d : ",inet_ntoa(get_address()->sin_addr), m_read_idx);
         return true;
     }
     //ET读数据
@@ -345,7 +346,7 @@ http_conn::HTTP_CODE http_conn::process_read()
     LINE_STATE line_status = LINE_OK;
     HTTP_CODE ret = NO_REQUEST;
     char *text = 0;
-
+    LOG_INFO("client(%s) Process Read : \n %s", inet_ntoa(get_address()->sin_addr), m_read_buf);
     while ((m_check_state == CHECK_STATE_CONTENT && line_status == LINE_OK) || ((line_status = parse_line()) == LINE_OK))
     {
         text = get_line();
@@ -383,6 +384,7 @@ http_conn::HTTP_CODE http_conn::process_read()
             return INTERNAL_ERROR;
         }
     }
+
     return NO_REQUEST;
 }
 
@@ -696,6 +698,7 @@ bool http_conn::process_write(HTTP_CODE ret)
 
 void http_conn::process()
 {
+    LOG_INFO("client(%s) Processing", inet_ntoa(get_address()->sin_addr));
     HTTP_CODE read_ret = process_read();
     if(read_ret == NO_REQUEST)
     {
@@ -708,4 +711,5 @@ void http_conn::process()
         close_conn();
     }
     modfd(m_epollfd, m_sockfd, EPOLLOUT, m_TRIGMode);
+    LOG_INFO("client(%s) Process Sucessfule", inet_ntoa(get_address()->sin_addr));
 }

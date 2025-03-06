@@ -44,11 +44,15 @@ void time_wheel::add_timer(tw_timer* timer)
 /* 将定时器从slot链表中删除 */
 void time_wheel::del_timer(tw_timer* timer)
 {   
+    LOG_INFO("dele timer");
     if(!timer) return;
+    //LOG_INFO("Client(%s) Exit", inet_ntoa(timer->data_user->address.sin_addr));
     // 从链表中取出timer
     timer->prev->next = timer->next;
     timer->prev->next->prev = timer->prev;
+
     delete timer;
+    LOG_INFO("Client(%s) Exit", inet_ntoa(timer->data_user->address.sin_addr));
 }
 
 void time_wheel::adjust_timer(tw_timer* timer)
@@ -56,9 +60,11 @@ void time_wheel::adjust_timer(tw_timer* timer)
     if(!timer) return;
     // 从链表中取出timer
     timer->prev->next = timer->next;
-    timer->prev->next->prev = timer->prev;
+    timer->next->prev = timer->prev;
+
     int slot = (cur_slot + 3) % N;
     int rot = 0;
+
     timer->rotation = 0;
     timer->time_slot = slot;
     add_timer(timer);
@@ -67,6 +73,7 @@ void time_wheel::adjust_timer(tw_timer* timer)
 /* 心跳函数 */
 void time_wheel::tick()
 {
+
     tw_timer* tmp = slot_head[cur_slot]->next;
     // 遍历触发当前slot指针上的定时器
     while(tmp != slot_tail[cur_slot])
@@ -76,8 +83,10 @@ void time_wheel::tick()
         {
             --tmp->rotation;
         }else {
+            LOG_INFO("Client : %s Timeout : %p",inet_ntoa(tmp->data_user->address.sin_addr), tmp->cb_func);
             tmp->cb_func(tmp->data_user);
-            delete tmp;
+            del_timer(tmp);
+            //delete tmp;
         }
         tmp = next;
     }
@@ -160,8 +169,11 @@ void Utils::show_error(int connfd, const char* info)
 void cb_func(client_data* user_data)
 {
     epoll_ctl(Utils::u_epollfd, EPOLL_CTL_DEL, user_data->sockfd, 0);
+    //std::cout << "tick" << std::endl;
     assert(user_data);
     close(user_data->sockfd);
+    // 移除定时器
+    //user_data->timer->
     http_conn::m_user_count--;
 }
 

@@ -33,12 +33,13 @@ private:
     sem m_queuestat;                // 任务信号量
     sqlconnection_pool *m_connpool; // 数据库连接池
     int m_actor_model;              // 同步/异步模式
+    int m_close_log = 0;            // 日志开启
 };
 
 
 template<typename T>
 /* 事件驱动模式， 数据库连接池， 线程数量， 请求队列大小 */
-threadpool<T>::threadpool(int m_actor_model, sqlconnection_pool* connpool, int thread_number, int max_requests)
+threadpool<T>::threadpool(int actor_model, sqlconnection_pool* connpool, int thread_number, int max_requests)
 {
     if(thread_number <= 0 || max_requests <= 0)
         throw std::exception();
@@ -60,6 +61,11 @@ threadpool<T>::threadpool(int m_actor_model, sqlconnection_pool* connpool, int t
             throw std::exception();
         }
     }
+    m_max_requests = max_requests;
+    m_thread_number = thread_number;
+    m_actor_model = actor_model;
+    m_connpool = connpool;
+    LOG_INFO("ThreadPool init successfull : thread_numver : %d, max_request : %d", m_thread_number, m_max_requests);
 }
 
 template<typename T>
@@ -79,6 +85,7 @@ bool threadpool<T>::append(T* request, int state)
     }
     request->m_state = state;
     m_workqueue.push_back(request);
+    LOG_INFO("thread Push the client(%s)", inet_ntoa(request->get_address()->sin_addr));
     queuelock.unlock();
     // 通知休眠的工作进程
     m_queuestat.post();
@@ -89,12 +96,14 @@ template<typename T>
 bool threadpool<T>::append_p(T* request)
 {
     queuelock.lock();
+    LOG_INFO("WorkQueue number : %d, The max workqueue number %d", m_workqueue.size(), m_max_requests);
     if(m_workqueue.size() >= m_max_requests)
     {
         queuelock.unlock();
         return false;
     }
     m_workqueue.push_back(request);
+    LOG_INFO("thread Push the client(%s)", inet_ntoa(request->get_address()->sin_addr));
     queuelock.unlock();
     // 通知休眠的工作进程
     m_queuestat.post();
@@ -127,8 +136,11 @@ void threadpool<T>::run()
         if(!request)
             continue;
         
+        LOG_INFO( "thread Get the client(%s)", inet_ntoa(request->get_address()->sin_addr) );
+        //LOG_INFO("actor_mode : %d", m_actor_model);
         if(1 == m_actor_model)
         {
+            //LOG_INFO("Start reactor Process");
             // 1 表示工作线程启动reactor模式，工作线程进行 读、写和逻辑处理
             if(0 == request->m_state)
             {
@@ -155,6 +167,7 @@ void threadpool<T>::run()
         }else {
             // 0 表示工作线程启动proactor模式，工作线程只进行逻辑处理
             sqlconnectionRAII mysqlcon(&request->mysql, m_connpool);
+            //LOG_INFO("Start Proactor Process");
             request->process();
         }
     }

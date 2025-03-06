@@ -3,119 +3,63 @@
 
 #include <iostream>
 #include <stdlib.h>
-#include <pthread.h>
-#include <sys/time.h>
+#include <thread>
+#include <atomic>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <chrono>
 #include "../lock/locker.h"
 
 /**
  *    阻塞队列
- *   循环数组实现阻塞队列，保证线程安全，在访问队列时，加上互斥锁
+ *    双缓冲队列： 一个生产者队列，一个消费者队列，消费者队列为空时，交换生产者与消费者队列
 */
 
 template< typename T>
 class block_queue
 {
 public:
-    block_queue(int max_size = 1000)
+    block_queue(int max_size = 1000) : m_size(0), nonblock(false)
     {
         if(max_size <= 0)
         {
             exit(-1);
         }
         m_max_size = 1000;
-        m_array = new T[m_max_size];
-        m_size = 0;
-        m_front = -1;
-        m_back = -1;
-    }
-    void clear()
-    {
-        m_mutex.lock();
-        m_size = 0;
-        m_front = -1;
-        m_back = -1;
-        m_mutex.unlock();
-    }
-    ~block_queue()
-    {
-        m_mutex.lock();
-        if(m_array != NULL)
-        {
-            delete []m_array;
-        }
-        m_mutex.unlock();
     }
 
+    ~block_queue() {}
+
+    void clear()
+    {
+        std::lock_guard<std::mutex> lock(producerMutex);
+        nonblock = true;
+        not_empty.notify_all();
+    }
+    
     // 判断是否队列已满
     bool full()
     {
-        m_mutex.lock();
-        if(m_size >= m_max_size)
-        {
-            m_mutex.unlock();
-            return true;
-        }
-        m_mutex.unlock();
-        return false;
+        int tmp = m_size.load(std::memory_order_seq_cst);
+        return tmp == m_max_size;
     }
 
     // 判断队列是否为空
     bool empty()
     {
-        m_mutex.lock();
-        if(0 == m_size)
-        {
-            m_mutex.unlock();
-            return true;
-        }
-        m_mutex.unlock();
-        return false;
-    }
-
-    // 返回队首元素
-    bool front(T &value)
-    {
-        m_mutex.lock();
-        if(0 == m_size)
-        {
-            m_mutex.unlock();
-            return false;
-        }
-        value = m_array[m_front];
-        m_mutex.unlock();
-        return true;
-    }
-
-    // 返回队尾元素
-    bool back(T &value)
-    {
-        m_mutex.lock();
-        if(0 == m_size)
-        {
-            m_mutex.unlock();
-            return false;
-        }
-        value = m_array[m_back];
-        m_mutex.unlock();
-        return true;
+        return m_size.load(std::memory_order_seq_cst) == 0;
     }
 
     int size()
     {
-        int tmp = 0;
-        m_mutex.lock();
-        tmp = m_size;
-        m_mutex.unlock();
+        int tmp = m_size.load(std::memory_order_seq_cst);
         return tmp;
     }
 
     int max_size()
     {
-        int tmp = 0;
-        m_mutex.lock();
-        tmp = m_max_size;
-        m_mutex.unlock();
-        return tmp;
+        return m_max_size;
     }
 
     /**
@@ -124,92 +68,68 @@ public:
     */
    bool push(const T& item)
    {
-        m_mutex.lock();
-
-        if(m_size >= m_max_size)
-        {
-            m_cond.broadcast();
-            m_mutex.unlock();
-            return false;
-        }
-        
-        // 在队尾放入元素
-        m_back = (m_back + 1) % m_max_size;
-        m_array[m_back] = item;
-        m_size++;
-
-        m_cond.broadcast();
-        m_mutex.unlock();
+        std::unique_lock<std::mutex> lock(producerMutex);
+        producerQueue.push(item);
+        m_size.fetch_add(1, std::memory_order_seq_cst);
+        not_empty.notify_one();
         return true;
    }
 
     bool pop(T &item)
     {
-        m_mutex.lock();
-        while(m_size <= 0)
-        {
-            if(!m_cond.wait(m_mutex.get()))
-            {
-                m_mutex.unlock();
-                return false;
-            }
+        std::unique_lock<std::mutex> lock(consumerMutex);
+        if(consumerQueue.empty() && swapQueue() == 0) {
+            return false;
         }
-
-        m_front = (m_front + 1) % m_max_size;
-        item = m_array[m_front];
-        m_size--;
-        m_mutex.unlock();
-        return true;
+        item = consumerQueue.front();
+        consumerQueue.pop();
+        m_size.fetch_add(-1, std::memory_order_seq_cst);
     }
 
     // 增加了超时处理
-    bool pop(T &item, int ms_timeout)
-    {
-        struct timespec t = {0, 0};
-        struct timeval now = {0, 0};
-        gettimeofday(&now, NULL);
-        m_mutex.lock();
-
-        if(m_size <= 0) 
-        {
-            t.tv_sec = now.tv_sec + ms_timeout / 1000;
-            t.tv_nsec = (ms_timeout % 1000) * 1000;
-            if(!m_cond.timewait(t, m_mutex.get()))
-            {
-                m_mutex.unlock();
-                return false;
-            }
-        }
-
-        if(m_size <= 0)
-        {
-            m_mutex.unlock();
+    bool pop(T &item, std::chrono::milliseconds timeout) {
+        std::unique_lock<std::mutex> lock(consumerMutex);
+        if(consumerQueue.empty() && swapQueue(timeout) == 0) {
             return false;
         }
-
-        m_front = (m_front + 1) % m_max_size;
-        item = m_array[m_front];
-        m_size--;
-        m_mutex.unlock();
+        item = consumerQueue.front();
+        consumerQueue.pop();
+        m_size.fetch_add(-1, std::memory_order_seq_cst);
         return true;
     }
-    
+
+    // 交换消费者队列与生产者队列
+    int swapQueue() {
+        std::unique_lock<std::mutex> lock(producerMutex);
+        not_empty.wait(lock, [this] { return !producerQueue.empty() || nonblock; });
+        std::swap(producerQueue, consumerQueue);
+        return consumerQueue.size();
+    }
+
+    // 增加了超时返回
+    int swapQueue(std::chrono::milliseconds timeout){
+        std::unique_lock<std::mutex> lock(producerQueue);
+        not_empty.wait_for(lock, timeout, [this] { return !producerQueue.empty() || nonblock; });
+        std::swap(producerQueue, consumerQueue);
+        return consumerQueue.size();
+    }
+
 private:
     // 互斥锁，实现线程安全访问队列
-    locker m_mutex;
-    // 条件变量，通知线程向队列存入数据或者取出数据
-    cond m_cond;
+    std::mutex producerMutex;       // 生产者互斥锁
+    std::mutex consumerMutex;       // 消费者互斥锁
+    std::condition_variable not_empty;  // 条件变量
+
+    bool nonblock;      // 是否启用工作队列
+
+    std::queue<T> producerQueue;    // 生产者队列
+    std::queue<T> consumerQueue;    // 消费者队列
 
     // 队列最大容量
     int m_max_size;
-    // 队列起始地址
-    T *m_array;
-    // 队列中的元素
-    int m_size;
-    // 队头
-    int m_front;
-    // 队尾
-    int m_back;
+    // 队列中的元素, 使用原子序列
+    std::atomic<int> m_size;
+    
 };
 
 #endif

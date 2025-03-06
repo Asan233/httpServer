@@ -54,6 +54,7 @@ private:
     int cur_slot;                           // 当前指针指向什么插槽
     tw_timer* slot_head[N];                 // 每个插槽的头指针，方便插入与删除定时器
     tw_timer* slot_tail[N];                 // 每个插槽的尾指针，方便插入与删除定时器
+    int m_close_log = 0;
 };
 
 void cb_func(client_data* user_data);       //定时器回调函数

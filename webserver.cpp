@@ -173,7 +173,12 @@ void WebServer::timer(int connfd, struct sockaddr_in client_address)
     // 创建定时器，设置回调函数与超时时间，绑定http_conn 与 定时器
     users_timer[connfd].address = client_address;
     users_timer[connfd].sockfd = connfd;
+
     tw_timer *timer = new tw_timer(0 , 3);
+    timer->data_user = users_timer + connfd;
+    timer->cb_func = cb_func;
+    //LOG_INFO("address : %d", cb_func);
+
     users_timer[connfd].timer = timer;
     utils.m_time_wheel.add_timer(timer);
 }
@@ -183,7 +188,7 @@ void WebServer::timer(int connfd, struct sockaddr_in client_address)
 void WebServer::adjust_timer(tw_timer* timer)
 {
     utils.m_time_wheel.adjust_timer(timer);
-    LOG_INFO("%s", "adjust timer once");
+    LOG_INFO("Client(%s) Adjust Timer", inet_ntoa(timer->data_user->address.sin_addr));
 }
 
 void WebServer::deal_timer(tw_timer* timer, int sockfd)
@@ -228,6 +233,7 @@ bool WebServer::dealclientdata()
                 LOG_ERROR("%s: errno is:%d", "accept error", errno);
                 break;
             }
+
             if(http_conn::m_user_count >= MAX_FD)
             {
                 utils.show_error(connfd, "Internal server busy");
@@ -238,6 +244,7 @@ bool WebServer::dealclientdata()
         }
         return false;
     }
+    LOG_INFO("Accept Client(%s)", inet_ntoa(client_address.sin_addr));
     return true;
 }
 
@@ -302,7 +309,7 @@ void WebServer::dealwithread(int sockfd)
         // proactor
         if(users[sockfd].read_once())
         {
-            LOG_INFO("deal with the client(%s)", inet_ntoa(users[sockfd].get_address()->sin_addr));
+            LOG_INFO("Proactor deal with the client(%s)", inet_ntoa(users[sockfd].get_address()->sin_addr));
 
             // 若监测到读事件，则放入请求队列
             m_pool->append_p(users + sockfd);
@@ -409,13 +416,11 @@ void WebServer::eventLoop()
             {
                 dealwithwrite(sockfd);
             }
-        }
+        }                                                             
         if (timeout)
         {
             utils.timer_handler();
-
-            LOG_INFO("%s", "timer tick");
-
+            //LOG_INFO("%s", "timer tick");
             timeout = false;
         }
     }
