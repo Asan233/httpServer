@@ -2,6 +2,7 @@
     "files.associations": {
         "*.tcc": "cpp",
         "ostream": "cpp",
-        "condition_variable": "cpp"
+        "condition_variable": "cpp",
+        "thread": "cpp"
     }
 }

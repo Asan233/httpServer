@@ -84,6 +84,7 @@ public:
         item = consumerQueue.front();
         consumerQueue.pop();
         m_size.fetch_add(-1, std::memory_order_seq_cst);
+        return true;
     }
 
     // 增加了超时处理
